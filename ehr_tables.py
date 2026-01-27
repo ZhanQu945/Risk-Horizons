@@ -3,8 +3,8 @@ import os
 import pandas as pd
 import numpy as np
 
-data_path = "/data/walrus/ws/zhqu771g-EHR-data/Data"
-output_dir = "/data/horse/ws/zhqu771g-GRAIL/Processed"
+data_path = "/yourpath"
+output_dir = "/yourpath"
 os.makedirs(output_dir, exist_ok=True)
 
 med_file = os.path.join(data_path, "prescriptions.csv.gz")
@@ -22,9 +22,9 @@ d_proc = os.path.join(data_path, 'd_icd_procedures.csv.gz')
 d_lab = os.path.join(data_path, 'd_labitems.csv.gz')
 
 # drug code mapping files from GAMENet repo
-ndc2atc_file = '/data/walrus/ws/zhqu771g-EHR-data/Tools/Drug/ndc2atc_level4.csv' 
-cid_atc = '/data/walrus/ws/zhqu771g-EHR-data/Tools/Drug/drug-atc.csv'
-ndc2rxnorm_file = '/data/walrus/ws/zhqu771g-EHR-data/Tools/Drug/ndc2rxnorm_mapping.txt'
+ndc2atc_file = "/yourpath" 
+cid_atc = "/yourpath"
+ndc2rxnorm_file = "/yourpath"
 
 #use this function if the icd codes in the tables are not in the standard format, i.e., with missing decimal points
 def normalize_icd_codes(df, table_name):
@@ -378,10 +378,6 @@ data = data.sort_values(by=['subject_id', 'admittime'])
 data.drop(columns=['gender', 'age', 'death', 'readmission'], axis=1, inplace=True)
 
 data.to_pickle(os.path.join(output_dir, "ehr_tables_full_withlab.pkl"))
-# ad_pd.to_pickle('/data/horse/ws/zhqu771g-TRACE/Processed/ehr_ad.pkl')
-# diag_pd.to_pickle('/data/horse/ws/zhqu771g-TRACE/Processed/ehr_diag.pkl')
-# pro_pd.to_pickle('/data/horse/ws/zhqu771g-TRACE/Processed/ehr_pro.pkl')
-# med_pd.to_pickle('/data/horse/ws/zhqu771g-TRACE/Processed/ehr_med.pkl')
 lab_pd.to_pickle(os.path.join(output_dir, "ehr_lab.pkl"))
 
 d_lab_pd = pd.read_csv(d_lab)
@@ -505,11 +501,3 @@ sample_path = os.path.join(output_dir, "ehr_samples_50.csv")
 data_sample = data.sample(n=min(50, len(data)), random_state=13)
 data_sample.to_csv(sample_path, index=False)
 print(f"Wrote sample file: {sample_path}")
-
-
-# ds = pd.read_pickle('/data/horse/ws/zhqu771g-TRACE/Processed/discharge_separated.pkl') 
-# merged = pd.merge(data, ds, on=["subject_id", "hadm_id"],   how="inner", suffixes=("_df1", "_df2"))
-# print(merged.head(10))
-# print(merged.head(5).to_string())
-
-# merged.to_pickle('/data/horse/ws/zhqu771g-TRACE/Processed/mimic_combined_withlab.pkl')

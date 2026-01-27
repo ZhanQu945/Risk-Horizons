@@ -1,9 +1,7 @@
 torch
 geoopt
 networkx
-scikit-learn
 numpy
-matplotlib
 pandas
 icdcodex
 transformers

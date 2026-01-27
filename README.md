@@ -8,8 +8,8 @@ The code is modularized into the following components:
 | :--- | :--- |
 | **`grail/`** | **Core library.** Data preprocessing, graph construction, hyperbolic modeling, retrieval, LLM reranking, and evaluation utilities. |
 | **`run_experiment.py`** | **Main runner.** End-to-end training/evaluation with configurable hyperparameters and ablations. |
-| **`data_gen.py`** | **Legacy simulation.** Synthetic example kept for reference. |
-| **`graph_builder.py`** | **Legacy topology utility.** Simple PMI stitching reference implementation. |
+| **`ehr_tables.py`** | **Data prep.** Builds visit-level tables and label maps from MIMIC-IV-style CSVs. |
+| **`requirements.txt`** | **Dependencies.** Minimal runtime requirements for reproducibility. |
 
 ## ✅ End-to-end pipeline
 
@@ -25,11 +25,17 @@ GRAIL is implemented end-to-end with the following stages:
 
 ## 🚀 Quickstart
 
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
 ```bash
 python run_experiment.py \\
-  --data-path /data/horse/ws/zhqu771g-GRAIL/Processed/ehr_tables_full_withlab.pkl \\
+  --data-path /your_path/ehr_tables_full_withlab.pkl \\
   --format pickle \\
-  --label-map /data/horse/ws/zhqu771g-GRAIL/Processed/ehr_label_map.json \\
+  --label-map /your_path/ehr_label_map.json \\
   --text-mode hybrid \\
   --embedding-dim 64 \\
   --manifold poincare \\
@@ -53,13 +59,17 @@ Text/hybrid options:
 
 1) **Preprocess MIMIC-IV raw tables**  
    Run `ehr_tables.py` to build visit-level tables and label maps.
+   - Update the file paths at the top of `ehr_tables.py` (they are set to `/yourpath` placeholders).
+   - Required inputs include `admissions.csv.gz`, `patients.csv.gz`, `diagnoses_icd.csv.gz`, `procedures_icd.csv.gz`,
+     `prescriptions.csv.gz`, `labevents.csv.gz`, and the corresponding dictionary files.
+   - Optional medication mapping files are supported; if not provided, medication labels will fall back to code strings.
 
 2) **Train + evaluate GRAIL**  
    Run `run_experiment.py` to train embeddings and evaluate predictions.
 
 ## 📊 Outputs and metrics
 
-Results are saved to `/data/horse/ws/zhqu771g-GRAIL/outputs` as JSON, e.g. `/data/horse/ws/zhqu771g-GRAIL/outputs/grail_hybrid_poincare_metrics.json`.
+Results are saved to `/your_path/outputs` as JSON, e.g. `/your_path/grail_hybrid_poincare_metrics.json`.
 Metrics include per-modality:
 - `recall@k`, `precision@k`, `ndcg@k`
 - `mrr`
@@ -84,9 +94,9 @@ Use `--baseline` to select baselines:
 Example:
 ```bash
 python run_experiment.py \
-  --data-path /data/horse/ws/zhqu771g-TRACE/Processed/ehr_tables_full_withlab.pkl \
+  --data-path /path/to/ehr_tables_full_withlab.pkl \
   --format pickle \
-  --label-map /data/horse/ws/zhqu771g-TRACE/Processed/ehr_label_map.json \
+  --label-map /path/to/ehr_label_map.json \
   --text-mode hybrid \
   --baseline retain
 ```
@@ -113,3 +123,4 @@ Key switches (see `grail/config.py`) for ablation studies:
 
 - Lagged association statistics are computed on training patients only to prevent leakage.
 - The LLM reranker is optional and defaults to a no-op for offline reproducibility.
+- No patient data is included in this repository. You must obtain the dataset separately and follow its data use agreement.
