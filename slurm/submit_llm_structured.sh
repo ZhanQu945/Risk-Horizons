@@ -25,7 +25,7 @@ LLM_BACKEND=${LLM_BACKEND:-hf}
 LLM_MODEL=${LLM_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
 TEXT_MODE=${TEXT_MODE:-text}
 
-${PYTHON_BIN} -u run_llm_only_freq_candidates.py \
+${PYTHON_BIN} -u scripts/llm/run_llm_only_freq_candidates.py \
   --data-path "${DATA_PATH}" \
   --format pickle \
   --label-map "${LABEL_MAP}" \

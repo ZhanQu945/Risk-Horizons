@@ -22,7 +22,7 @@ EICU_DATA_PATH=${EICU_DATA_PATH:-./Processed/eicu/ehr_tables_full_withlab.pkl}
 EICU_LABEL_MAP=${EICU_LABEL_MAP:-./Processed/eicu/ehr_label_map.json}
 EICU_LAB_GROUPS=${EICU_LAB_GROUPS:-./Processed/eicu/ehr_lab_groups.csv}
 
-${PYTHON_BIN} run_prepare_splits.py \
+${PYTHON_BIN} scripts/experiments/run_prepare_splits.py \
   --mimic-data-path "${MIMIC_DATA_PATH}" \
   --mimic-label-map "${MIMIC_LABEL_MAP}" \
   --mimic-lab-groups "${MIMIC_LAB_GROUPS}" \

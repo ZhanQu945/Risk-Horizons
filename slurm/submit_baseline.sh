@@ -22,7 +22,7 @@ LABEL_MAP=${LABEL_MAP:-./Processed/mimiciv/ehr_label_map.json}
 LAB_GROUPS=${LAB_GROUPS:-./Processed/mimiciv/ehr_lab_groups.csv}
 SPLIT_FILE=${SPLIT_FILE:-./Processed/mimiciv/splits/ehr_tables_full_withlab_seed13_tr0.80_val0.10_mv2.json}
 
-${PYTHON_BIN} -u run_experiment.py \
+${PYTHON_BIN} -u scripts/experiments/run_experiment.py \
   --data-path "${DATA_PATH}" \
   --format pickle \
   --label-map "${LABEL_MAP}" \

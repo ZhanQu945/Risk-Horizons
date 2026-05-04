@@ -15,12 +15,12 @@ PYTHON_BIN=${PYTHON_BIN:-python}
 GEOM_ARTIFACT=${GEOM_ARTIFACT:?Set GEOM_ARTIFACT to a geometry_artifacts.pt path}
 RUN_NAME=${RUN_NAME:-viz_run}
 
-${PYTHON_BIN} run_export_viz_inputs.py \
+${PYTHON_BIN} scripts/viz/run_export_viz_inputs.py \
   --artifact "${GEOM_ARTIFACT}" \
   --run-name "${RUN_NAME}"
 
-# Edit VIZ_INPUT_DIR to the output directory from run_export_viz_inputs.py
+# Edit VIZ_INPUT_DIR to the output directory from scripts/viz/run_export_viz_inputs.py
 VIZ_INPUT_DIR=${VIZ_INPUT_DIR:?Set VIZ_INPUT_DIR to exported visualization input directory}
 
-${PYTHON_BIN} hyperbolic_viz.py \
+${PYTHON_BIN} scripts/viz/hyperbolic_viz.py \
   --input-dir "${VIZ_INPUT_DIR}"

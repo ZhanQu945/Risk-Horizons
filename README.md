@@ -11,16 +11,18 @@ No run outputs are included; minimal de-identified Slurm job scripts are provide
 
 ## 1) Repository Layout
 
+- `scripts/`: entrypoint scripts grouped by function
+  - `preprocess/`, `experiments/`, `llm/`, `analysis/`, `viz/`
 - `grail/`: core library
   - preprocessing utilities, graph construction, model, retrieval, training, evaluation, baselines
-- `run_experiment.py`: main end-to-end runner (geometry + optional LLM reranking + baselines)
-- `preprocess_mimic_iv.py`, `preprocess_eicu.py`: dataset preprocessing
-- `run_prepare_splits.py`, `run_prepare_splits_eicu.py`: fixed split generation/reuse
-- `run_llm_only_freq_candidates.py`: LLM-only structured-candidate inference with expansion/retrieval policies
-- `run_pretrained_ehr_baseline.py`: pretrained BEHRT/MedBERT baseline launcher
-- `hyperbolic_viz.py`, `run_export_viz_inputs.py`, `run_visualize_artifact.py`: geometry visualization tools
-- `run_seed_summary.py`: multi-seed aggregation
-- `run_analyze_failure_modes.py`: post-hoc failure mode analysis
+- `scripts/experiments/run_experiment.py`: main end-to-end runner (geometry + optional LLM reranking + baselines)
+- `scripts/preprocess/preprocess_mimic_iv.py`, `scripts/preprocess/preprocess_eicu.py`: dataset preprocessing
+- `scripts/experiments/run_prepare_splits.py`, `scripts/experiments/run_prepare_splits_eicu.py`: fixed split generation/reuse
+- `scripts/llm/run_llm_only_freq_candidates.py`: LLM-only structured-candidate inference with expansion/retrieval policies
+- `scripts/experiments/run_pretrained_ehr_baseline.py`: pretrained BEHRT/MedBERT baseline launcher
+- `scripts/viz/hyperbolic_viz.py`, `scripts/viz/run_export_viz_inputs.py`, `scripts/viz/run_visualize_artifact.py`: geometry visualization tools
+- `scripts/analysis/run_seed_summary.py`: multi-seed aggregation
+- `scripts/analysis/run_analyze_failure_modes.py`: post-hoc failure mode analysis
 
 ## 2) Environment
 
@@ -47,24 +49,24 @@ Each modality column should contain a list of codes per visit.
 
 MIMIC-IV:
 ```bash
-python preprocess_mimic_iv.py --help
+python scripts/preprocess/preprocess_mimic_iv.py --help
 ```
 
 eICU:
 ```bash
-python preprocess_eicu.py --help
+python scripts/preprocess/preprocess_eicu.py --help
 ```
 
 ## 5) Split Generation / Reuse
 
 General split prep (multiple seeds, both datasets):
 ```bash
-python run_prepare_splits.py --help
+python scripts/experiments/run_prepare_splits.py --help
 ```
 
 eICU-only split prep helper:
 ```bash
-python run_prepare_splits_eicu.py --help
+python scripts/experiments/run_prepare_splits_eicu.py --help
 ```
 
 All experiments support `--split-file` so train/val/test can be fixed and reused.
@@ -73,7 +75,7 @@ All experiments support `--split-file` so train/val/test can be fixed and reused
 
 Example command template:
 ```bash
-python -u run_experiment.py \
+python -u scripts/experiments/run_experiment.py \
   --data-path <processed_table.pkl> \
   --format pickle \
   --label-map <label_map.json> \
@@ -109,7 +111,7 @@ python -u run_experiment.py \
 ## 7) LLM Variants
 
 ### 7.1 Geometry + LLM reranking
-Use `run_experiment.py` with:
+Use `scripts/experiments/run_experiment.py` with:
 - `--pipeline-stage llm`
 - `--geometry-artifact-path <geometry_artifacts.pt>`
 - `--llm-backend {hf|openai|heuristic|ftcls}`
@@ -118,19 +120,19 @@ This path uses structured candidates with optional expansion and scores candidat
 
 ### 7.2 LLM-only structured candidates (+ expansion/policies)
 ```bash
-python run_llm_only_freq_candidates.py --help
+python scripts/llm/run_llm_only_freq_candidates.py --help
 ```
 
 ### 7.3 Fine-tuned LLM classifier
 Train:
 ```bash
-python run_llm_finetune.py --help
+python scripts/experiments/run_llm_finetune.py --help
 ```
-Use as reranker via `run_experiment.py --llm-backend ftcls --ft-llm-checkpoint <ckpt>`.
+Use as reranker via `scripts/experiments/run_experiment.py --llm-backend ftcls --ft-llm-checkpoint <ckpt>`.
 
 ## 8) Baselines
 
-Run through `run_experiment.py --baseline <name>`:
+Run through `scripts/experiments/run_experiment.py --baseline <name>`:
 - `transformer`
 - `retain`
 - `gram`
@@ -144,12 +146,12 @@ Run through `run_experiment.py --baseline <name>`:
 
 Pretrained BEHRT/MedBERT helper:
 ```bash
-python run_pretrained_ehr_baseline.py --help
+python scripts/experiments/run_pretrained_ehr_baseline.py --help
 ```
 
 ## 9) Major Ablations (Flags)
 
-Ablations are controlled in `run_experiment.py`, including:
+Ablations are controlled in `scripts/experiments/run_experiment.py`, including:
 - geometry manifold (`--manifold`),
 - no-stitch/euclidean variants (baseline switches),
 - multi-head / mixture / multi-cone,
@@ -162,17 +164,17 @@ Ablations are controlled in `run_experiment.py`, including:
 
 Export visualization inputs from artifacts:
 ```bash
-python run_export_viz_inputs.py --help
+python scripts/viz/run_export_viz_inputs.py --help
 ```
 
 Generate hyperbolic embedding figures:
 ```bash
-python hyperbolic_viz.py --help
+python scripts/viz/hyperbolic_viz.py --help
 ```
 
 Artifact-level visualization:
 ```bash
-python run_visualize_artifact.py --help
+python scripts/viz/run_visualize_artifact.py --help
 ```
 
 ## 11) Evaluation Outputs
@@ -194,11 +196,11 @@ Implemented metrics include:
 ## 12) Slurm Job Scripts (Minimal)
 
 Each Slurm script is a thin wrapper around one Python entrypoint:
-- `slurm/submit_prepare_splits.sh` -> `run_prepare_splits.py`
-- `slurm/submit_grail_main.sh` -> `run_experiment.py` (main GRAIL config)
-- `slurm/submit_llm_structured.sh` -> `run_llm_only_freq_candidates.py`
-- `slurm/submit_baseline.sh` -> `run_experiment.py --baseline <name>`
-- `slurm/submit_viz.sh` -> `run_export_viz_inputs.py` then `hyperbolic_viz.py`
+- `slurm/submit_prepare_splits.sh` -> `scripts/experiments/run_prepare_splits.py`
+- `slurm/submit_grail_main.sh` -> `scripts/experiments/run_experiment.py` (main GRAIL config)
+- `slurm/submit_llm_structured.sh` -> `scripts/llm/run_llm_only_freq_candidates.py`
+- `slurm/submit_baseline.sh` -> `scripts/experiments/run_experiment.py --baseline <name>`
+- `slurm/submit_viz.sh` -> `scripts/viz/run_export_viz_inputs.py` then `scripts/viz/hyperbolic_viz.py`
 
 These scripts are de-identified and path-agnostic; configure inputs/models through environment variables.
 
