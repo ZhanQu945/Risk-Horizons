@@ -55,18 +55,28 @@ def micro_f1(scores: List[float], truth: List[int], threshold: float) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def tune_threshold(scores_list: List[List[float]], truth_list: List[List[int]]) -> float:
+def tune_threshold(
+    scores_list: List[List[float]],
+    truth_list: List[List[int]],
+    max_candidates: int = 512,
+) -> float:
     all_scores = sorted({s for scores in scores_list for s in scores})
     if not all_scores:
         return 0.5
-    best_th = all_scores[0]
+    # Full unique-score sweep can be extremely slow on large validation sets.
+    # Downsample candidate thresholds to a quantile grid when needed.
+    if len(all_scores) > max_candidates:
+        qs = np.linspace(0.0, 1.0, num=max_candidates)
+        arr = np.asarray(all_scores, dtype=float)
+        all_scores = sorted(set(np.quantile(arr, qs).tolist()))
+    best_th = float(all_scores[0])
     best_f1 = -1.0
     for th in all_scores:
         f1s = [micro_f1(scores, truth, th) for scores, truth in zip(scores_list, truth_list)]
         avg_f1 = float(np.mean(f1s)) if f1s else 0.0
         if avg_f1 > best_f1:
             best_f1 = avg_f1
-            best_th = th
+            best_th = float(th)
     return best_th
 
 

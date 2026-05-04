@@ -15,8 +15,8 @@ class DataConfig:
         "med": "ndc",
         "lab": "lab_test",
     })
-    min_visits: int = 3
-    min_code_freq: int = 25
+    min_visits: int = 2
+    min_code_freq: int = 0
     top_k_per_modality: Optional[Dict[str, int]] = None
     text_mode: str = "hybrid"  # "hybrid" | "code" | "text"
     label_map_path: Optional[str] = None
@@ -28,12 +28,16 @@ class DataConfig:
 @dataclass
 class GraphConfig:
     max_lag: int = 1
+    include_intra_visit: bool = True
     pmi_thresh: float = 0.0
     min_support: int = 3
     top_m_per_node: int = 50
     use_ppmi: bool = True
     bootstrap_samples: int = 0
     bootstrap_keep_q: float = 0.6
+    include_intra_modality_pmi: bool = False
+    require_joint_lag01: bool = False
+    joint_lag01_min_support: int = 3
 
 
 @dataclass
@@ -48,6 +52,14 @@ class ModelConfig:
     softmax_beta: float = 5.0
     cone_aperture: float = 0.5
     cone_bonus: float = 1.0
+    barycenter_heads: int = 1
+    barycenter_mixture: bool = False
+    use_central_attention: bool = False
+    use_idf_weighting: bool = False
+    use_modality_weighting: bool = False
+    central_pos_decay: float = 1.0
+    multi_cone_retrieval: bool = False
+    persistence_bonus: float = 0.0
 
 
 @dataclass
@@ -86,5 +98,5 @@ class ExperimentConfig:
     train: TrainConfig
     eval: EvalConfig
     rerank: RerankConfig
-    output_dir: str = "/data/horse/ws/zhqu771g-GRAIL/outputs"
+    output_dir: str = "./outputs"
     run_name: str = "grail"

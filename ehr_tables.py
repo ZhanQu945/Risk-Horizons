@@ -2,10 +2,20 @@ import json
 import os
 import pandas as pd
 import numpy as np
+from datetime import datetime
 
-data_path = "/yourpath"
-output_dir = "/yourpath"
+data_path = os.environ.get("GRAIL_MIMIC_DATA_PATH", "./Data")
+output_dir = os.environ.get("GRAIL_PROCESSED_DIR", "./Processed/mimiciv")
 os.makedirs(output_dir, exist_ok=True)
+
+
+def _backup_if_exists(path):
+    if not os.path.exists(path):
+        return
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bak = f"{path}.bak_{ts}"
+    os.rename(path, bak)
+    print(f"Backed up existing file: {bak}")
 
 med_file = os.path.join(data_path, "prescriptions.csv.gz")
 procedure_file = os.path.join(data_path, "procedures_icd.csv.gz")
@@ -22,9 +32,9 @@ d_proc = os.path.join(data_path, 'd_icd_procedures.csv.gz')
 d_lab = os.path.join(data_path, 'd_labitems.csv.gz')
 
 # drug code mapping files from GAMENet repo
-ndc2atc_file = "/yourpath" 
-cid_atc = "/yourpath"
-ndc2rxnorm_file = "/yourpath"
+ndc2atc_file = './Tools/Drug/ndc2atc_level4.csv' 
+cid_atc = './Tools/Drug/drug-atc.csv'
+ndc2rxnorm_file = './Tools/Drug/ndc2rxnorm_mapping.txt'
 
 #use this function if the icd codes in the tables are not in the standard format, i.e., with missing decimal points
 def normalize_icd_codes(df, table_name):
@@ -377,13 +387,54 @@ data = data.merge(ad_pd, on=['subject_id', 'hadm_id'], how='inner')
 data = data.sort_values(by=['subject_id', 'admittime'])
 data.drop(columns=['gender', 'age', 'death', 'readmission'], axis=1, inplace=True)
 
-data.to_pickle(os.path.join(output_dir, "ehr_tables_full_withlab.pkl"))
-lab_pd.to_pickle(os.path.join(output_dir, "ehr_lab.pkl"))
+def _clean_code_list(values):
+    if not isinstance(values, (list, tuple, np.ndarray)):
+        return []
+    out = []
+    for v in values:
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if not s or s.lower() == "nan":
+            continue
+        out.append(s)
+    return list(dict.fromkeys(out))
+
+for col in ["icd_code", "pro_code", "ndc", "lab_test"]:
+    data[col] = data[col].map(_clean_code_list)
+
+before_clean_rows = len(data)
+empty_counts_before_drop = {col: int((data[col].map(len) == 0).sum()) for col in ["icd_code", "pro_code", "ndc", "lab_test"]}
+mask_complete = (
+    (data["icd_code"].map(len) > 0)
+    & (data["pro_code"].map(len) > 0)
+    & (data["ndc"].map(len) > 0)
+    & (data["lab_test"].map(len) > 0)
+)
+data = data[mask_complete].copy()
+after_clean_rows = len(data)
+
+table_path = os.path.join(output_dir, "ehr_tables_full_withlab.pkl")
+lab_pickle_path = os.path.join(output_dir, "ehr_lab.pkl")
+lab_group_path = os.path.join(output_dir, "ehr_lab_groups.csv")
+label_map_path = os.path.join(output_dir, "ehr_label_map.json")
+stats_path = os.path.join(output_dir, "preprocess_stats.json")
+sample_path = os.path.join(output_dir, "ehr_samples_50.csv")
+
+for p in [table_path, lab_pickle_path, lab_group_path, label_map_path, stats_path, sample_path]:
+    _backup_if_exists(p)
+
+data.to_pickle(table_path)
+# ad_pd.to_pickle('./Processed/ehr_ad.pkl')
+# diag_pd.to_pickle('./Processed/ehr_diag.pkl')
+# pro_pd.to_pickle('./Processed/ehr_pro.pkl')
+# med_pd.to_pickle('./Processed/ehr_med.pkl')
+lab_pd.to_pickle(lab_pickle_path)
 
 d_lab_pd = pd.read_csv(d_lab)
 d_lab_pd["itemid"] = d_lab_pd["itemid"].astype(str)
 d_lab_pd[["itemid", "category"]].drop_duplicates().to_csv(
-    os.path.join(output_dir, "ehr_lab_groups.csv"), index=False
+    lab_group_path, index=False
 )
 
 # Build label map for text/hybrid vocab
@@ -446,33 +497,75 @@ for code, name in atc_desc.items():
     if len(code) >= 5:
         label_map["med"].setdefault(code[:5], name)
 
-with open(os.path.join(output_dir, "ehr_label_map.json"), "w") as f:
+with open(label_map_path, "w") as f:
     json.dump(label_map, f)
 
 def _print_summary():
+    summary_payload = {}
     print("=== Preprocessing Summary ===")
     print(f"Visits: {len(data)}")
     print(f"Patients: {data['subject_id'].nunique()}")
     print(f"Admissions: {data['hadm_id'].nunique()}")
+    summary_payload["visits"] = int(len(data))
+    summary_payload["patients"] = int(data["subject_id"].nunique())
+    summary_payload["admissions"] = int(data["hadm_id"].nunique())
+    summary_payload["cleaning"] = {
+        "rows_before_cleaning": int(before_clean_rows),
+        "rows_after_cleaning": int(after_clean_rows),
+        "rows_dropped_for_empty_modality": int(before_clean_rows - after_clean_rows),
+        "empty_counts_before_drop": empty_counts_before_drop,
+    }
     print("Code counts per modality (per-visit stats):")
     def _stats(series):
         counts = series.map(len)
         return {
+            "count": int(counts.shape[0]),
+            "zero_count": int((counts == 0).sum()),
             "min": float(counts.min()),
             "max": float(counts.max()),
             "median": float(counts.median()),
             "mean": float(counts.mean()),
+            "std": float(counts.std(ddof=0)),
             "p25": float(counts.quantile(0.25)),
             "p75": float(counts.quantile(0.75)),
             "p90": float(counts.quantile(0.90)),
         }
+    summary_payload["events_per_visit"] = {}
+    all_counts = pd.Series(
+        data["icd_code"].map(len)
+        + data["pro_code"].map(len)
+        + data["ndc"].map(len)
+        + data["lab_test"].map(len)
+    )
     for name, col in [("dx", "icd_code"), ("proc", "pro_code"), ("med", "ndc"), ("lab", "lab_test")]:
         stats = _stats(data[col])
+        summary_payload["events_per_visit"][name] = stats
         print(
             f"  {name}: min={stats['min']:.0f} max={stats['max']:.0f} "
             f"median={stats['median']:.2f} mean={stats['mean']:.2f} "
+            f"std={stats['std']:.2f} zero={stats['zero_count']} "
             f"p25={stats['p25']:.2f} p75={stats['p75']:.2f} p90={stats['p90']:.2f}"
         )
+    all_stats = {
+        "count": int(all_counts.shape[0]),
+        "zero_count": int((all_counts == 0).sum()),
+        "min": float(all_counts.min()),
+        "max": float(all_counts.max()),
+        "median": float(all_counts.median()),
+        "mean": float(all_counts.mean()),
+        "std": float(all_counts.std(ddof=0)),
+        "p25": float(all_counts.quantile(0.25)),
+        "p75": float(all_counts.quantile(0.75)),
+        "p90": float(all_counts.quantile(0.90)),
+    }
+    summary_payload["all_events_per_visit"] = all_stats
+    print(
+        "  all: "
+        f"min={all_stats['min']:.0f} max={all_stats['max']:.0f} "
+        f"median={all_stats['median']:.2f} mean={all_stats['mean']:.2f} "
+        f"std={all_stats['std']:.2f} zero={all_stats['zero_count']} "
+        f"p25={all_stats['p25']:.2f} p75={all_stats['p75']:.2f} p90={all_stats['p90']:.2f}"
+    )
     visit_counts = data.groupby("subject_id")["hadm_id"].nunique()
     print("Visits per patient:")
     print(
@@ -481,23 +574,90 @@ def _print_summary():
         f"p25={visit_counts.quantile(0.25):.2f} p75={visit_counts.quantile(0.75):.2f} "
         f"p90={visit_counts.quantile(0.90):.2f}"
     )
+    summary_payload["visits_per_patient"] = {
+        "count": int(visit_counts.shape[0]),
+        "min": float(visit_counts.min()),
+        "max": float(visit_counts.max()),
+        "median": float(visit_counts.median()),
+        "mean": float(visit_counts.mean()),
+        "std": float(visit_counts.std(ddof=0)),
+        "p25": float(visit_counts.quantile(0.25)),
+        "p75": float(visit_counts.quantile(0.75)),
+        "p90": float(visit_counts.quantile(0.90)),
+    }
     print("Top codes per modality:")
+    summary_payload["top_codes"] = {}
     for name, col in [("dx", "icd_code"), ("proc", "pro_code"), ("med", "ndc"), ("lab", "lab_test")]:
         top_codes = pd.Series([c for codes in data[col] for c in codes]).value_counts().head(5)
+        summary_payload["top_codes"][name] = {str(k): int(v) for k, v in top_codes.to_dict().items()}
         print(f"  {name}: {top_codes.to_dict()}")
     print("Samples (first 3 visits):")
     print(data[['subject_id', 'hadm_id', 'admittime', 'icd_code', 'pro_code', 'ndc', 'lab_test']].head(3).to_string())
     print("Lab items sample (first 3):")
     print(lab_pd.head(3).to_string())
     print("Output files:")
-    print(os.path.join(output_dir, "ehr_tables_full_withlab.pkl"))
-    print(os.path.join(output_dir, "ehr_lab.pkl"))
-    print(os.path.join(output_dir, "ehr_lab_groups.csv"))
-    print(os.path.join(output_dir, "ehr_label_map.json"))
+    print(table_path)
+    print(lab_pickle_path)
+    print(lab_group_path)
+    print(label_map_path)
+    with open(stats_path, "w") as f:
+        json.dump(summary_payload, f, indent=2)
+    print(stats_path)
 
 _print_summary()
 
-sample_path = os.path.join(output_dir, "ehr_samples_50.csv")
-data_sample = data.sample(n=min(50, len(data)), random_state=13)
+max_rows = 50
+max_visits_per_patient = 5
+patient_order = (
+    data[["subject_id"]]
+    .drop_duplicates()
+    .sample(frac=1, random_state=13)["subject_id"]
+    .tolist()
+)
+chunks = []
+rows = 0
+for pid in patient_order:
+    part = data[data["subject_id"] == pid].sort_values("admittime").head(max_visits_per_patient)
+    if part.empty:
+        continue
+    chunks.append(part)
+    rows += len(part)
+    if rows >= max_rows:
+        break
+if chunks:
+    data_sample = pd.concat(chunks, ignore_index=True).head(max_rows).copy()
+else:
+    data_sample = data.head(0).copy()
+data_sample = data_sample.sort_values(["subject_id", "admittime"]).copy()
+data_sample["patient_visit_rank"] = data_sample.groupby("subject_id").cumcount() + 1
+
+def _render_label(code, modality, mode):
+    code = str(code)
+    desc = label_map.get(modality, {}).get(code, "")
+    if mode == "code":
+        return code
+    if mode == "text":
+        return desc if desc else code
+    # hybrid
+    return f"{desc} ({code})" if desc else code
+
+def _render_codes(codes, modality, mode):
+    if not isinstance(codes, list):
+        return []
+    return [_render_label(c, modality, mode) for c in codes]
+
+for modality, col in [("dx", "icd_code"), ("proc", "pro_code"), ("med", "ndc"), ("lab", "lab_test")]:
+    data_sample[f"{modality}_code_view"] = data_sample[col].map(lambda x: _render_codes(x, modality, "code"))
+    data_sample[f"{modality}_text_view"] = data_sample[col].map(lambda x: _render_codes(x, modality, "text"))
+    data_sample[f"{modality}_hybrid_view"] = data_sample[col].map(lambda x: _render_codes(x, modality, "hybrid"))
+
 data_sample.to_csv(sample_path, index=False)
 print(f"Wrote sample file: {sample_path}")
+
+
+# ds = pd.read_pickle('./Processed/discharge_separated.pkl') 
+# merged = pd.merge(data, ds, on=["subject_id", "hadm_id"],   how="inner", suffixes=("_df1", "_df2"))
+# print(merged.head(10))
+# print(merged.head(5).to_string())
+
+# merged.to_pickle('./Processed/mimic_combined_withlab.pkl')

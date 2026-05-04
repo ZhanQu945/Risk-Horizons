@@ -1,126 +1,212 @@
-This repository contains the official PyTorch implementation of **GRAIL**, a neuro-symbolic framework for longitudinal EHR forecasting. GRAIL leverages hyperbolic geometry to model hierarchical medical concepts and Risk Cones to retrieve structured context for downstream reasoning.
+# GRAIL: Geometry-Aware Retrieval-Augmented Inference with LLMs over Hyperbolic Representations of Patient Trajectories
 
-## 📂 Repository Structure
+This repository contains the PyTorch implementation of GRAIL for longitudinal EHR next-visit prediction, including:
+- hyperbolic geometry model (main method),
+- LLM inference variants (structured candidate scoring with expansion),
+- baseline models,
+- preprocessing and split generation,
+- visualization and evaluation utilities.
 
-The code is modularized into the following components:
+No run outputs are included; minimal de-identified Slurm job scripts are provided in `slurm/` for reproducibility.
 
-| File | Description |
-| :--- | :--- |
-| **`grail/`** | **Core library.** Data preprocessing, graph construction, hyperbolic modeling, retrieval, LLM reranking, and evaluation utilities. |
-| **`run_experiment.py`** | **Main runner.** End-to-end training/evaluation with configurable hyperparameters and ablations. |
-| **`ehr_tables.py`** | **Data prep.** Builds visit-level tables and label maps from MIMIC-IV-style CSVs. |
-| **`requirements.txt`** | **Dependencies.** Minimal runtime requirements for reproducibility. |
+## 1) Repository Layout
 
-## ✅ End-to-end pipeline
+- `grail/`: core library
+  - preprocessing utilities, graph construction, model, retrieval, training, evaluation, baselines
+- `run_experiment.py`: main end-to-end runner (geometry + optional LLM reranking + baselines)
+- `preprocess_mimic_iv.py`, `preprocess_eicu.py`: dataset preprocessing
+- `run_prepare_splits.py`, `run_prepare_splits_eicu.py`: fixed split generation/reuse
+- `run_llm_only_freq_candidates.py`: LLM-only structured-candidate inference with expansion/retrieval policies
+- `run_pretrained_ehr_baseline.py`: pretrained BEHRT/MedBERT baseline launcher
+- `hyperbolic_viz.py`, `run_export_viz_inputs.py`, `run_visualize_artifact.py`: geometry visualization tools
+- `run_seed_summary.py`: multi-seed aggregation
+- `run_analyze_failure_modes.py`: post-hoc failure mode analysis
 
-GRAIL is implemented end-to-end with the following stages:
-
-1) **Data preprocessing**: load visit-level tables, filter codes, build vocab + deterministic hierarchies.  
-2) **Graph construction**: add hierarchy edges and lagged cross-modal PMI edges (bootstrap optional).  
-3) **Hyperbolic embeddings**: train typed edge reconstruction with negative sampling.  
-4) **Central Events**: log–exp barycenters and soft assignment.  
-5) **Risk Horizon**: cone-filtered retrieval across modalities.  
-6) **Geometric–LLM reranking**: optional inference-time reranking.  
-7) **Evaluation + ablations**: Recall/Precision/nDCG/MRR across modalities.
-
-## 🚀 Quickstart
-
-Install dependencies:
+## 2) Environment
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## 3) Data Format
+
+Input table is visit-level with at least:
+- `subject_id`
+- visit timestamp (`admittime` by default)
+- modality columns (defaults):
+  - `icd_code` (dx)
+  - `pro_code` (proc)
+  - `ndc` (med)
+  - `lab_test` (lab; optional)
+
+Each modality column should contain a list of codes per visit.
+
+## 4) Preprocessing
+
+MIMIC-IV:
 ```bash
-python run_experiment.py \\
-  --data-path /your_path/ehr_tables_full_withlab.pkl \\
-  --format pickle \\
-  --label-map /your_path/ehr_label_map.json \\
-  --text-mode hybrid \\
-  --embedding-dim 64 \\
-  --manifold poincare \\
-  --epochs 50
+python preprocess_mimic_iv.py --help
 ```
 
-The input table should contain one row per visit with at least:
-
-```
-subject_id, admittime, icd_code, pro_code, ndc, lab_test
-```
-
-Each modality column must be a list of codes for that visit.
-
-Text/hybrid options:
-- `--text-mode hybrid` (default): description + code when available
-- `--text-mode code`: codes only (lab codes prefixed with `lab_`)
-- `--text-mode text`: descriptions only (falls back to code if missing)
-
-## 🧭 Recommended run order
-
-1) **Preprocess MIMIC-IV raw tables**  
-   Run `ehr_tables.py` to build visit-level tables and label maps.
-   - Update the file paths at the top of `ehr_tables.py` (they are set to `/yourpath` placeholders).
-   - Required inputs include `admissions.csv.gz`, `patients.csv.gz`, `diagnoses_icd.csv.gz`, `procedures_icd.csv.gz`,
-     `prescriptions.csv.gz`, `labevents.csv.gz`, and the corresponding dictionary files.
-   - Optional medication mapping files are supported; if not provided, medication labels will fall back to code strings.
-
-2) **Train + evaluate GRAIL**  
-   Run `run_experiment.py` to train embeddings and evaluate predictions.
-
-## 📊 Outputs and metrics
-
-Results are saved to `/your_path/outputs` as JSON, e.g. `/your_path/grail_hybrid_poincare_metrics.json`.
-Metrics include per-modality:
-- `recall@k`, `precision@k`, `ndcg@k`
-- `mrr`
-- `micro_f1` (threshold tuned on validation when scores available)
-- hierarchy-aware diagnosis metrics: `dx/hier_dist`, `dx/ancestor_match@2`
-- primary diagnosis: `dx_primary/top@k`, `dx_primary/mrr`
-- grounding: `grounded_rate`, `unsupported_rate`
-
-## 🧪 Baselines
-
-Use `--baseline` to select baselines:
-- `grail` (default)
-- `transformer` (visit-token Transformer)
-- `retain` (RETAIN)
-- `gram` (ontology-aware GRAM-style)
-- `behrt` (masked-visit pretraining + Transformer)
-- `medbert` (masked-visit pretraining + Transformer)
-- `hyper_no_stitch` (hyperbolic without cross-modal stitching)
-- `euclid_grail` (Euclidean embeddings with GRAIL topology)
-- `euclid_rag` (Euclidean retrieval + reranking)
-
-Example:
+eICU:
 ```bash
-python run_experiment.py \
-  --data-path /path/to/ehr_tables_full_withlab.pkl \
+python preprocess_eicu.py --help
+```
+
+## 5) Split Generation / Reuse
+
+General split prep (multiple seeds, both datasets):
+```bash
+python run_prepare_splits.py --help
+```
+
+eICU-only split prep helper:
+```bash
+python run_prepare_splits_eicu.py --help
+```
+
+All experiments support `--split-file` so train/val/test can be fixed and reused.
+
+## 6) Main Experiment (Strong Hyperbolic GRAIL)
+
+Example command template:
+```bash
+python -u run_experiment.py \
+  --data-path <processed_table.pkl> \
   --format pickle \
-  --label-map /path/to/ehr_label_map.json \
-  --text-mode hybrid \
-  --baseline retain
+  --label-map <label_map.json> \
+  --lab-groups <lab_groups.csv> \
+  --text-mode text \
+  --min-visits 2 \
+  --min-code-freq 0 \
+  --disable-lab-tests \
+  --baseline grail \
+  --llm-backend none \
+  --pipeline-stage geometry \
+  --barycenter-heads 8 \
+  --barycenter-mixture \
+  --multi-cone-retrieval \
+  --include-intra-modality-pmi \
+  --require-joint-lag01 \
+  --joint-lag01-min-support 3 \
+  --pmi-thresh 0.05 \
+  --persistence-bonus 0.8 \
+  --seed 13 \
+  --split-file <split.json> \
+  --early-stop-patience 5 \
+  --early-stop-min-delta 0.0003 \
+  --early-stop-max-traj 600 \
+  --early-stop-metric recall@10 \
+  --max-local-candidates 16000 \
+  --max-candidates 100 \
+  --cone-aperture 0.80 \
+  --save-all-samples \
+  --run-name <run_name>
 ```
 
-## 🧠 LLM reranking
+## 7) LLM Variants
 
-Default LLM backend is `hf` with `meta-llama/Llama-3.1-8B-Instruct`.
-Override with:
+### 7.1 Geometry + LLM reranking
+Use `run_experiment.py` with:
+- `--pipeline-stage llm`
+- `--geometry-artifact-path <geometry_artifacts.pt>`
+- `--llm-backend {hf|openai|heuristic|ftcls}`
+
+This path uses structured candidates with optional expansion and scores candidates at inference time.
+
+### 7.2 LLM-only structured candidates (+ expansion/policies)
 ```bash
---llm-backend openai --llm-model gpt-4.1-mini
+python run_llm_only_freq_candidates.py --help
 ```
 
-## 🔬 Ablations
+### 7.3 Fine-tuned LLM classifier
+Train:
+```bash
+python run_llm_finetune.py --help
+```
+Use as reranker via `run_experiment.py --llm-backend ftcls --ft-llm-checkpoint <ckpt>`.
 
-Key switches (see `grail/config.py`) for ablation studies:
+## 8) Baselines
 
-- **Euclidean baseline**: `ModelConfig(manifold="euclidean")`
-- **No stitching**: `GraphConfig(max_lag=0, pmi_thresh=inf)` or skip `build_graph` cross edges
-- **No denoising**: set `ModelConfig(alpha_mask=0.0)` to disable masked reconstruction
-- **No cones**: set `ModelConfig(cone_aperture=1.0)` to accept all candidates
-- **LLM reranking off**: `RerankConfig(backend="none")`
+Run through `run_experiment.py --baseline <name>`:
+- `transformer`
+- `retain`
+- `gram`
+- `behrt`
+- `medbert`
+- `halo`
+- `copy_last`
+- `hyper_no_stitch`
+- `euclid_grail`
+- `euclid_rag`
 
-## 📌 Notes
+Pretrained BEHRT/MedBERT helper:
+```bash
+python run_pretrained_ehr_baseline.py --help
+```
 
-- Lagged association statistics are computed on training patients only to prevent leakage.
-- The LLM reranker is optional and defaults to a no-op for offline reproducibility.
-- No patient data is included in this repository. You must obtain the dataset separately and follow its data use agreement.
+## 9) Major Ablations (Flags)
+
+Ablations are controlled in `run_experiment.py`, including:
+- geometry manifold (`--manifold`),
+- no-stitch/euclidean variants (baseline switches),
+- multi-head / mixture / multi-cone,
+- PMI/support controls (`--pmi-thresh`, `--joint-lag01-min-support`, intra-modality PMI flags),
+- retrieval size controls (`--max-local-candidates`, `--max-candidates`),
+- persistence prior (`--persistence-bonus`),
+- LLM weighting (`--lambda-llm`).
+
+## 10) Visualization
+
+Export visualization inputs from artifacts:
+```bash
+python run_export_viz_inputs.py --help
+```
+
+Generate hyperbolic embedding figures:
+```bash
+python hyperbolic_viz.py --help
+```
+
+Artifact-level visualization:
+```bash
+python run_visualize_artifact.py --help
+```
+
+## 11) Evaluation Outputs
+
+Typical run output directory contains:
+- metrics JSON (`*_geometry_metrics.json` or `*_all_metrics.json`),
+- runtime summary JSON,
+- split stats JSON,
+- sample outputs JSON (full test predictions if `--save-all-samples`).
+
+Implemented metrics include:
+- Recall@K, Precision@K, nDCG@K, MRR
+- macro aggregates
+- persistent vs novel buckets
+- seen-train vs unseen-train buckets (and crossed buckets with novelty)
+- hierarchy-aware metrics (where applicable)
+- efficiency metrics
+
+## 12) Slurm Job Scripts (Minimal)
+
+Each Slurm script is a thin wrapper around one Python entrypoint:
+- `slurm/submit_prepare_splits.sh` -> `run_prepare_splits.py`
+- `slurm/submit_grail_main.sh` -> `run_experiment.py` (main GRAIL config)
+- `slurm/submit_llm_structured.sh` -> `run_llm_only_freq_candidates.py`
+- `slurm/submit_baseline.sh` -> `run_experiment.py --baseline <name>`
+- `slurm/submit_viz.sh` -> `run_export_viz_inputs.py` then `hyperbolic_viz.py`
+
+These scripts are de-identified and path-agnostic; configure inputs/models through environment variables.
+
+Examples:
+```bash
+sbatch slurm/submit_prepare_splits.sh
+sbatch slurm/submit_grail_main.sh
+BASELINE=transformer sbatch slurm/submit_baseline.sh
+LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct sbatch slurm/submit_llm_structured.sh
+GEOM_ARTIFACT=/path/to/geometry_artifacts.pt VIZ_INPUT_DIR=/path/to/viz_inputs sbatch slurm/submit_viz.sh
+```

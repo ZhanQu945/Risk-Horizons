@@ -13,11 +13,13 @@ def _iter_lagged_pairs(
     max_lag: int,
     modality_src: str,
     modality_tgt: str,
+    include_intra_visit: bool,
 ) -> Iterable[Tuple[int, int]]:
+    start_lag = 0 if include_intra_visit else 1
     for traj in trajectories:
         visits = traj.visits
         for t in range(len(visits)):
-            for lag in range(max_lag + 1):
+            for lag in range(start_lag, max_lag + 1):
                 if t + lag >= len(visits):
                     continue
                 src_codes = visits[t].get(modality_src, [])
@@ -33,22 +35,32 @@ def build_cross_modal_edges(
     trajectories: List[PatientTrajectory],
     vocab: Vocab,
     max_lag: int,
+    include_intra_visit: bool,
     pmi_thresh: float,
     min_support: int,
     top_m_per_node: int,
     use_ppmi: bool,
+    include_intra_modality_pmi: bool = False,
+    require_joint_lag01: bool = False,
+    joint_lag01_min_support: int = 3,
 ) -> List[Tuple[int, int, str, float]]:
     edges: List[Tuple[int, int, str, float]] = []
     modalities = sorted(vocab.modality_roots.keys())
     for m_src in modalities:
         for m_tgt in modalities:
-            if m_src == m_tgt:
+            if m_src == m_tgt and not include_intra_modality_pmi:
                 continue
             pair_counts: Dict[Tuple[int, int, int], int] = Counter()
             src_counts: Dict[Tuple[int, int], int] = Counter()
             tgt_counts: Dict[Tuple[int, int], int] = Counter()
             total_by_lag: Dict[int, int] = Counter()
-            for lag, src, tgt in _iter_lagged_pairs(trajectories, max_lag, m_src, m_tgt):
+            for lag, src, tgt in _iter_lagged_pairs(
+                trajectories,
+                max_lag,
+                m_src,
+                m_tgt,
+                include_intra_visit,
+            ):
                 pair_counts[(lag, src, tgt)] += 1
                 src_counts[(lag, src)] += 1
                 tgt_counts[(lag, tgt)] += 1
@@ -58,6 +70,11 @@ def build_cross_modal_edges(
             for (lag, src, tgt), count in pair_counts.items():
                 if count < min_support:
                     continue
+                if require_joint_lag01:
+                    c0 = int(pair_counts.get((0, src, tgt), 0))
+                    c1 = int(pair_counts.get((1, src, tgt), 0))
+                    if c0 < joint_lag01_min_support or c1 < joint_lag01_min_support:
+                        continue
                 total = total_by_lag[lag]
                 if total == 0:
                     continue
@@ -81,12 +98,16 @@ def build_graph(
     trajectories: List[PatientTrajectory],
     vocab: Vocab,
     max_lag: int,
+    include_intra_visit: bool,
     pmi_thresh: float,
     min_support: int,
     top_m_per_node: int,
     use_ppmi: bool,
     bootstrap_samples: int,
     bootstrap_keep_q: float,
+    include_intra_modality_pmi: bool = False,
+    require_joint_lag01: bool = False,
+    joint_lag01_min_support: int = 3,
 ) -> nx.DiGraph:
     graph = nx.DiGraph()
     graph.add_nodes_from(vocab.id_to_node.keys())
@@ -101,10 +122,14 @@ def build_graph(
             trajectories,
             vocab,
             max_lag,
+            include_intra_visit,
             pmi_thresh,
             min_support,
             top_m_per_node,
             use_ppmi,
+            include_intra_modality_pmi=include_intra_modality_pmi,
+            require_joint_lag01=require_joint_lag01,
+            joint_lag01_min_support=joint_lag01_min_support,
         )
     else:
         counts: Counter = Counter()
@@ -114,10 +139,14 @@ def build_graph(
                 sampled,
                 vocab,
                 max_lag,
+                include_intra_visit,
                 pmi_thresh,
                 min_support,
                 top_m_per_node,
                 use_ppmi,
+                include_intra_modality_pmi=include_intra_modality_pmi,
+                require_joint_lag01=require_joint_lag01,
+                joint_lag01_min_support=joint_lag01_min_support,
             )
             for u, v, edge_type, weight in edges_b:
                 counts[(u, v, edge_type)] += 1

@@ -1,4 +1,6 @@
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+import time
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -7,6 +9,14 @@ import geoopt
 
 from .data import PatientTrajectory
 from .model import GrailModel
+
+
+def _now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _log(msg: str) -> None:
+    print(f"[{_now()}] {msg}", flush=True)
 
 
 class EdgeDataset(Dataset):
@@ -70,19 +80,35 @@ def train_model(
     weight_decay: float,
     device: str,
     log_every: int,
-) -> None:
+    val_score_fn: Optional[Callable[[GrailModel, int], float]] = None,
+    early_stop_patience: int = 0,
+    early_stop_min_delta: float = 0.0,
+) -> Dict[str, float]:
     edge_loader = DataLoader(EdgeDataset(edges), batch_size=batch_size, shuffle=True, collate_fn=_collate_edges)
     visit_loader = DataLoader(VisitDataset(trajectories), batch_size=batch_size, shuffle=True, collate_fn=_collate_visits)
     optimizer = geoopt.optim.RiemannianAdam(model.parameters(), lr=lr, weight_decay=weight_decay)
     model.to(device)
+    _log(
+        f"train_model start | epochs={epochs} batch_size={batch_size} edge_batches={len(edge_loader)} "
+        f"visit_batches={len(visit_loader)}"
+    )
 
+    wall_start = time.perf_counter()
+    epoch_losses = []
+    best_state = None
+    best_epoch = 0
+    best_val_score = float("-inf")
+    bad_epochs = 0
     for epoch in range(1, epochs + 1):
+        ep_start = time.perf_counter()
         model.train()
         edge_iter = iter(edge_loader)
         visit_iter = iter(visit_loader)
         steps = max(len(edge_loader), len(visit_loader))
         total_loss = 0.0
-        for _ in range(steps):
+        batch_log_every = max(1, min(100, steps // 10 if steps >= 10 else 1))
+        _log(f"train_model epoch {epoch}/{epochs} start | steps={steps} | batch_log_every={batch_log_every}")
+        for step_idx in range(steps):
             optimizer.zero_grad()
             loss = 0.0
             try:
@@ -110,5 +136,48 @@ def train_model(
             loss.backward()
             optimizer.step()
             total_loss += float(loss.item())
-        if epoch % log_every == 0:
-            print(f"Epoch {epoch} | Loss {total_loss / steps:.4f}")
+            if (step_idx + 1) % batch_log_every == 0 or (step_idx + 1) == steps:
+                _log(
+                    f"train_model epoch {epoch}/{epochs} progress "
+                    f"{step_idx + 1}/{steps} | running_loss={total_loss / max(step_idx + 1, 1):.4f}"
+                )
+        mean_loss = total_loss / max(steps, 1)
+        epoch_losses.append(mean_loss)
+        ep_sec = time.perf_counter() - ep_start
+        elapsed = time.perf_counter() - wall_start
+        eta = (elapsed / max(epoch, 1)) * (epochs - epoch)
+        if epoch % log_every == 0 or epoch == 1 or epoch == epochs:
+            _log(
+                f"Epoch {epoch}/{epochs} | Loss {mean_loss:.4f} | "
+                f"epoch {ep_sec:.1f}s | elapsed {elapsed/60:.1f}m | eta {eta/60:.1f}m"
+            )
+        if val_score_fn is not None:
+            score = float(val_score_fn(model, epoch))
+            _log(f"Validation monitor | epoch={epoch} | score={score:.6f}")
+            if score > (best_val_score + float(early_stop_min_delta)):
+                best_val_score = score
+                best_epoch = epoch
+                bad_epochs = 0
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                _log(f"Validation improved -> best epoch {best_epoch} score={best_val_score:.6f}")
+            else:
+                bad_epochs += 1
+                _log(f"Validation did not improve | bad_epochs={bad_epochs}/{max(early_stop_patience, 0)}")
+                if early_stop_patience > 0 and bad_epochs >= early_stop_patience:
+                    _log(f"Early stopping triggered at epoch {epoch}.")
+                    break
+    if best_state is not None:
+        model.load_state_dict(best_state, strict=False)
+        _log(f"Restored best model from epoch {best_epoch} (val_score={best_val_score:.6f}).")
+    wall_sec = time.perf_counter() - wall_start
+    _log(f"train_model done | wall_time_sec={wall_sec:.2f}")
+    out = {
+        "epochs": float(epochs),
+        "wall_time_sec": float(wall_sec),
+        "steps_per_epoch": float(max(len(edge_loader), len(visit_loader))),
+        "final_loss": float(epoch_losses[-1] if epoch_losses else 0.0),
+    }
+    if best_state is not None:
+        out["best_epoch"] = float(best_epoch)
+        out["best_val_score"] = float(best_val_score)
+    return out
