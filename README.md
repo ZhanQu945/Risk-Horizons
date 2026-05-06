@@ -1,4 +1,4 @@
-# GRAIL: Geometry-Aware Retrieval-Augmented Inference with LLMs over Hyperbolic Representations of Patient Trajectories
+# Risk Horizons: Structured Hypothesis Spaces for Longitudinal Clinical Prediction
 
 This repository contains the PyTorch implementation of GRAIL for longitudinal EHR next-visit prediction, including:
 - hyperbolic geometry model (main method),
